@@ -17,4 +17,8 @@ function submitInquiry(data) {
   return callFunction('submitInquiry', data)
 }
 
-module.exports = { callFunction, submitInquiry }
+function getHomeModules() {
+  return callFunction('getHomeModules', {})
+}
+
+module.exports = { callFunction, submitInquiry, getHomeModules }
