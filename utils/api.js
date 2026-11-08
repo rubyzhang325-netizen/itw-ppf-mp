@@ -29,11 +29,15 @@ function getHomeModules() {
 function getApplicationResources() {
   return callFunction('getApplicationResources', {})
 }
+function getCurrentUser() {
+  return callFunction('getCurrentUser', {})
+}
 
 module.exports = {
   callFunction,
   submitInquiry,
   getHomeModules,
-  getApplicationResources
+  getApplicationResources,
+  getCurrentUser
 }
 
