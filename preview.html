@@ -1828,6 +1828,231 @@ const mediaFileIds = [
     document.querySelectorAll('.dots i').forEach((d, i) => d.classList.toggle('on', i === S.banner));
   }, 4000);
 
+  // ITW 产品库：从 CloudBase product 模型读取
+  async function syncProductsFromCloudBase() {
+    try {
+      const records = [];
+      let pageNumber = 1;
+
+      while (true) {
+        const result = await cloudApp.models.product.list({
+          filter: { where: {} },
+          pageSize: 100,
+          pageNumber,
+          getCount: false
+        });
+
+        if (result.error) throw result.error;
+
+        const page = result.data?.records || [];
+        records.push(...page);
+
+        if (page.length < 100) break;
+        pageNumber++;
+      }
+
+      // 字符串和数组统一处理
+      const asList = value => {
+        if (Array.isArray(value)) return value.filter(Boolean);
+        if (!value) return [];
+
+        if (typeof value === 'string') {
+          const text = value.trim();
+
+          if (text.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(text);
+              if (Array.isArray(parsed)) return parsed;
+            } catch (_) {}
+          }
+
+          return text
+            .split(/[；;，,\n]/)
+            .map(x => x.trim())
+            .filter(Boolean);
+        }
+
+        return [];
+      };
+
+      // 将产品代码及规格转为前端原有 skus 结构
+      const parseSkus = value => {
+        if (Array.isArray(value)) {
+          return value.map(x =>
+            typeof x === 'object'
+              ? {
+                  code: x.code || '',
+                  size: x.size || '',
+                  img: x.img || ''
+                }
+              : { code: String(x), size: '', img: '' }
+          );
+        }
+
+        if (!value) return [];
+
+        return String(value)
+          .split(/[；;\n]/)
+          .map(x => x.trim())
+          .filter(Boolean)
+          .map(text => {
+            const parts = text.split(/[｜|]/);
+
+            return {
+              code: (parts[0] || '').trim(),
+              size: (parts.slice(1).join('｜') || '').trim(),
+              img: ''
+            };
+          });
+      };
+
+      const isTrue = value =>
+        value === true ||
+        value === 1 ||
+        value === 'true' ||
+        value === '是' ||
+        value === 'yes';
+
+      const isVisible = value =>
+        value !== false &&
+        value !== 0 &&
+        value !== 'false' &&
+        value !== '否';
+
+      const normalizeAccess = value => {
+        if (
+          value === 'certified' ||
+          value === '认证会员'
+        ) return 'certified';
+
+        if (
+          value === 'employee' ||
+          value === 'staff' ||
+          value === '员工'
+        ) return 'staff';
+
+        if (
+          value === 'guest' ||
+          value === '游客'
+        ) return 'guest';
+
+        return 'registered';
+      };
+
+      const normalized = records
+        .filter(r => isVisible(r.visible))
+        .map(r => {
+          const brandName = String(r.brand || '').trim();
+
+          const knownBrand = CATALOG.BRANDS.find(b =>
+            b.name.toLowerCase() === brandName.toLowerCase()
+          );
+
+          const brandId = knownBrand
+            ? knownBrand.id
+            : 'cloud-' + brandName
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-');
+
+          const skus = parseSkus(
+            r.skuInfo || r.skus || r.sku
+          );
+
+          const productImage =
+            r.productImage || r.image || r.img || '';
+
+          if (productImage && skus.length) {
+            skus[0].img = productImage;
+          }
+
+          return {
+            id: r.code || r._id,
+            cloudId: r._id,
+            name: r.name || '未命名产品',
+            brand: brandId,
+            brandName: brandName || '其他品牌',
+            brandCn: r.brandCn ||
+              knownBrand?.cn || '',
+            series: r.series || '',
+            intro: r.description || r.intro || '',
+            usage: r.usage || '',
+            skus,
+            code: skus.map(x => x.code)
+              .filter(Boolean).join(' / ') ||
+              r.code || '',
+            markets: asList(r.markets),
+            fields: asList(r.fields),
+            isNew: isTrue(r.isNew),
+            access: normalizeAccess(
+              r.accessScope || r.access
+            ),
+            sort: Number(r.sort) || 0
+          };
+        })
+        .sort((a, b) => a.sort - b.sort);
+
+      // 只在云端查询成功后更新产品。
+      // 不保留本地旧产品，确保后台删除能反映到网页。
+      PRODUCTS.splice(0, PRODUCTS.length, ...normalized);
+
+      // 按云端产品重新生成品牌及数量
+      const brandIds = [...new Set(
+        normalized.map(p => p.brand)
+      )];
+
+      const newBrands = brandIds.map(id => {
+        const product = normalized.find(p => p.brand === id);
+        const oldBrand = CATALOG.BRANDS.find(b => b.id === id);
+
+        return {
+          id,
+          name: product.brandName,
+          cn: product.brandCn,
+          logo: oldBrand?.logo || '',
+          intro: oldBrand?.intro || '',
+          count: normalized.filter(p => p.brand === id).length
+        };
+      });
+
+      BRANDS.splice(0, BRANDS.length, ...newBrands);
+
+      // 重新初始化产品库筛选状态，避免旧品牌索引错位
+      for (const frameItem of S.stack) {
+        if (frameItem.page === 'products') {
+          frameItem.ps.brand = 0;
+          frameItem.ps.cat = 0;
+        }
+      }
+
+      // 产品加载完成后刷新当前页面
+      if (normalized.length > 0) {
+        render();
+      } else {
+        console.warn('CloudBase product 当前没有可显示的产品');
+      }
+
+      console.log(
+        'CloudBase product 同步成功：',
+        records.length,
+        '条原始记录，',
+        normalized.length,
+        '条可显示产品，',
+        newBrands.length,
+        '个品牌'
+      );
+
+    } catch (error) {
+      // 产品同步失败不影响应用库与其他页面
+      console.error(
+        'CloudBase product 同步失败：',
+        error
+      );
+    }
+  }
+
+  // 独立启动产品库同步，不影响现有应用库联动
+  syncProductsFromCloudBase();
+
   S.stack = [frame('index')];
   render(true);
   syncIndustriesFromCloudBase();
