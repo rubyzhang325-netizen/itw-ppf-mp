@@ -637,6 +637,26 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
   const CLOUDBASE_ENV_ID = 'miniprogram-2026-d7e2q4t739a5d49';
   const CLOUDBASE_PUBLISHABLE_KEY = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjlkMWRjMzFlLWI0ZDAtNDQ4Yi1hNzZmLWIwY2M2M2Q4MTQ5OCJ9.eyJpc3MiOiJodHRwczovL21pbmlwcm9ncmFtLTIwMjYtZDdlMnE0dDczOWE1ZDQ5LmFwLXNoYW5naGFpLnRjYi1hcGkudGVuY2VudGNsb3VkYXBpLmNvbSIsInN1YiI6ImFub24iLCJhdWQiOiJtaW5pcHJvZ3JhbS0yMDI2LWQ3ZTJxNHQ3MzlhNWQ0OSIsImV4cCI6NDA5NjMzODkyMywiaWF0IjoxNzkyNjU1NzIzLCJub25jZSI6Iks5dWR6SEdjU3hPSEJqX3ZaZ3oyN0EiLCJhdF9oYXNoIjoiSzl1ZHpIR2NTeE9IQmpfdlpnejI3QSIsIm5hbWUiOiJBbm9ueW1vdXMiLCJzY29wZSI6ImFub255bW91cyIsInByb2plY3RfaWQiOiJtaW5pcHJvZ3JhbS0yMDI2LWQ3ZTJxNHQ3MzlhNWQ0OSIsIm1ldGEiOnsicGxhdGZvcm0iOiJQdWJsaXNoYWJsZUtleSJ9LCJ1c2VyX3R5cGUiOiIiLCJjbGllbnRfdHlwZSI6ImNsaWVudF91c2VyIiwiaXNfc3lzdGVtX2FkbWluIjpmYWxzZX0.qqtFLgiLp4oh8uW7SBWF3Tvmam9ByDbVLhq1t-D5Bh_9__6-6daUQ5mxlMWnZJ4SbNF2hotzb8KkygKmo8gz1Oux1an0n9z6DBM-Uh4Qhf7t6tGaZPOQzRyWYmG9iZtbO01hRhq5oCfOcSBRL2rdu3csxyVXI30wh-XzB3_t4cwu4sz0QSoNUptzToWyOOU2LeaTIVmhPiKzR6vjYWyVGf-BmsnEJ049pxqfCLK4vgC2JCi4XFMOlvH6mVmdXjNaqUlBHmGp7R1VGdh0Ysmdh897T-4yaJN1Fbo79r81jU4pDlZFf76gN007TubxKo70LmWPb3A8N6f6m1h8l5WrEw';
 
+  const cloudApp = cloudbase.init({
+    env: CLOUDBASE_ENV_ID,
+    region: 'ap-shanghai',
+    accessKey: CLOUDBASE_PUBLISHABLE_KEY
+  });
+
+  function cloudFunctionPayload(response) {
+    let payload = response?.result ?? response?.data ?? response ?? {};
+
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (_) {
+        return {};
+      }
+    }
+
+    return payload || {};
+  }
+
   const CLOUD_INDUSTRY_IDS = {
     transportation: 'traffic',
     electronics: 'electronics',
@@ -649,12 +669,6 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
 
     async function syncIndustriesFromCloudBase() {
     try {
-      const cloudApp = cloudbase.init({
-        env: CLOUDBASE_ENV_ID,
-        region: 'ap-shanghai',
-        accessKey: CLOUDBASE_PUBLISHABLE_KEY
-      });
-
       async function listAll(model) {
         const records=[];let pageNumber=1;
         while(true){
@@ -665,9 +679,10 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
         }
         return {data:{records}};
       }
-      const [industryResult,categoryResult,applicationResult,resourceResult]=await Promise.all([
+      const [industryResult,categoryResult,applicationResult,resourceResult,homeFunctionResult]=await Promise.all([
         listAll(cloudApp.models.industries),listAll(cloudApp.models.application_categories),
-        listAll(cloudApp.models.applications),listAll(cloudApp.models.application_resources)
+        listAll(cloudApp.models.applications),listAll(cloudApp.models.application_resources),
+        cloudApp.callFunction({name:'getHomeModules',data:{},parse:true}).catch(error=>({error}))
       ]);
 
       if (industryResult.error) throw industryResult.error;
@@ -686,6 +701,24 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
       
       const resourceRecords =
         resourceResult.data?.records || [];
+
+      if (!homeFunctionResult.error) {
+        const homePayload = cloudFunctionPayload(homeFunctionResult);
+
+        if (homePayload.ok && Array.isArray(homePayload.modules) && homePayload.modules.length) {
+          const fixedAccess = new Map(
+            homeConfig.HOME.modules.map(item => [item.key, item.access])
+          );
+
+          homeConfig.HOME.modules = homePayload.modules.map(item => ({
+            ...item,
+            access: fixedAccess.get(item.key) || 'registered',
+            link: item.link || {}
+          }));
+        }
+      } else {
+        console.error('CloudBase home modules synchronization failed:', homeFunctionResult.error);
+      }
 
       const relationId = (record, field) => {
         const value = record[field];
@@ -973,7 +1006,8 @@ const mediaFileIds = [
         industryRecords.length,
         categoryRecords.length,
         applicationRecords.length,
-        resourceRecords.length
+        resourceRecords.length,
+        homeConfig.homeModules().length
       );
     } catch (error) {
       console.error(
@@ -1292,7 +1326,14 @@ const mediaFileIds = [
       } },
 
     inquiry: { title: '需求咨询', ppt: '14', access: 'registered', vis: () => ['all', '所有用户可见'],
-      init: q => ({ tab: [0,1,2].includes(Number(q.tab)) ? Number(q.tab) : 0, prov: '', city: '', marketId:'',segmentId:'' }),
+      init: q => ({
+        tab: [0,1,2].includes(Number(q.tab)) ? Number(q.tab) : 0,
+        prov: '',
+        city: '',
+        marketId: '',
+        segmentId: '',
+        requestId: `web-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      }),
       render(st, q) {
         const u = S.user;
         const prodSel = req => row('选择产品', req, `<select id="i-product" name="product"><option value="">-请选择-</option>${PRODUCTS.map(p => `<option value="${p.id}" ${q.product === p.id ? 'selected' : ''}>${esc(p.brandName + ' ' + p.name)}</option>`).join('')}</select>`);
@@ -1652,7 +1693,7 @@ const mediaFileIds = [
     render();restoreDraft(f);
   });
 
-  document.addEventListener('submit', e => {
+  document.addEventListener('submit', async e => {
     e.preventDefault();
     const form = e.target, fd = new FormData(form), v = k => (fd.get(k) || '').toString().trim();
     const err = m => toast(m);
@@ -1704,8 +1745,63 @@ const mediaFileIds = [
       if (!/^1\d{10}$/.test(v('phone'))) return err('手机号格式不正确');
       if (!/^\S+@\S+\.\S+$/.test(v('email')))return err('邮箱格式不正确');
       if (!fd.get('agree')) return err('请先同意使用条例和隐私权声明');
-      cur().ps.lastPayload={...Object.fromEntries(fd),...market,type:['sample','visit','general'][tab],productId:v('product'),applicationId:v('app')};
-      return modal('表单校验通过', '当前为前端演示，咨询尚未发送，也未通知销售。正式提交待后台接口接入。');
+      const payload = {
+        requestId: cur().ps.requestId,
+        type: ['sample','visit','general'][tab],
+        marketId: market.marketId,
+        segmentId: market.segmentId,
+        name: v('name'),
+        phone: v('phone'),
+        company: v('company'),
+        email: v('email'),
+        region: [v('prov'), v('city'), v('dist')].filter(Boolean),
+        address: v('address'),
+        question: v('question'),
+        purpose: v('purpose'),
+        scene: v('scene'),
+        productId: v('product'),
+        applicationId: v('app'),
+        agree: true,
+        marketing: !!fd.get('marketing')
+      };
+
+      cur().ps.lastPayload = payload;
+      const submitButton = form.querySelector('button[type="submit"]');
+
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = '提交中…';
+      }
+
+      try {
+        const response = await cloudApp.callFunction({
+          name: 'submitInquiry',
+          data: payload,
+          parse: true
+        });
+        const result = cloudFunctionPayload(response);
+
+        if (!result.ok) {
+          throw new Error(result.message || '提交失败，请稍后重试');
+        }
+
+        if (result.duplicate) {
+          return modal('咨询已提交', '系统识别到相同咨询，未重复创建记录。');
+        }
+
+        return modal(
+          '提交成功',
+          `咨询已保存到 CloudBase 后台。记录状态：${result.status || 'new'}；通知状态：${result.notificationStatus || 'pending'}。`
+        );
+      } catch (error) {
+        console.error('CloudBase inquiry submission failed:', error);
+        return err(error.message || '提交失败，请稍后重试');
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = '提交';
+        }
+      }
     }
   });
 
