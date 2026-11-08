@@ -680,17 +680,6 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
         return {data:{records}};
       }
       
-const [
-  industryResult,
-  categoryResult,
-  applicationResult,
-  resourceResult,
-  homeFunctionResult
-] = await Promise.all([
-  listAll(cloudApp.models.industries),
-  listAll(cloudApp.models.application_categories),
-  listAll(cloudApp.models.applications),
-  
 const [industryResult,categoryResult,applicationResult,resourceResult,homeFunctionResult]=await Promise.all([
   listAll(cloudApp.models.industries),listAll(cloudApp.models.application_categories),
   listAll(cloudApp.models.applications),listAll(cloudApp.models.application_resources),
