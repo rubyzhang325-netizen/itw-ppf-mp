@@ -680,17 +680,76 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
         return {data:{records}};
       }
       
-const [industryResult,categoryResult,applicationResult,resourceResult,homeFunctionResult]=await Promise.all([
-  listAll(cloudApp.models.industries),listAll(cloudApp.models.application_categories),
-  listAll(cloudApp.models.applications),listAll(cloudApp.models.application_resources),
-  cloudApp.callFunction({name:'getHomeModules',data:{},parse:true}).catch(error=>({error}))
+
+const [
+  industryResult,
+  categoryResult,
+  applicationResult,
+  resourceResult,
+  homeFunctionResult
+] = await Promise.all([
+  listAll(cloudApp.models.industries),
+  listAll(cloudApp.models.application_categories),
+  listAll(cloudApp.models.applications),
+
+  // 四个资源模型分别读取，并合并成原来的 records 格式
+  (async () => {
+    const sources = [
+      ['application_articles', 'article'],
+      ['application_videos', 'video'],
+      ['application_documents', 'document'],
+      ['application_ach', 'ach']
+    ];
+
+    const groups = await Promise.all(
+      sources.map(async ([modelName, kind]) => {
+        try {
+          const result = await listAll(cloudApp.models[modelName]);
+
+          if (result.error) {
+            throw result.error;
+          }
+
+          const records = result.data?.records || [];
+
+          console.log(
+            modelName + ' 同步成功:',
+            records.length
+          );
+
+          return records.map(item => ({
+            ...item,
+            resourceKind: kind
+          }));
+        } catch (error) {
+          console.error(
+            modelName + ' 同步失败:',
+            error
+          );
+          return [];
+        }
+      })
+    );
+
+    return {
+      data: {
+        records: groups.flat()
+      }
+    };
+  })(),
+
+  cloudApp.callFunction({
+    name: 'getHomeModules',
+    data: {},
+    parse: true
+  }).catch(error => ({ error }))
 ]);
+
 
 
       if (industryResult.error) throw industryResult.error;
       if (categoryResult.error) throw categoryResult.error;
       if (applicationResult.error) throw applicationResult.error;
-      if (resourceResult.error) throw resourceResult.error;
 
       const industryRecords =
         industryResult.data?.records || [];
@@ -723,19 +782,29 @@ const resourceRecords =
         console.error('CloudBase home modules synchronization failed:', homeFunctionResult.error);
       }
 
-      const relationId = (record, field) => {
-        const value = record[field];
+      
+const relationId = (record, field) => {
+  const value = record[field];
 
-        if (typeof value === 'string') {
-          return value;
-        }
+  if (typeof value === 'string') {
+    return value;
+  }
 
-        return (
-          value?._id ||
-          record['@' + field]?.v1?.record?._id ||
-          null
-        );
-      };
+  if (value && typeof value === 'object') {
+    if (value._id) return value._id;
+    if (value.id) return value.id;
+
+    if (Array.isArray(value) && value[0]) {
+      return value[0]._id || value[0].id || null;
+    }
+  }
+
+  return (
+    record['@' + field]?.v1?.record?._id ||
+    null
+  );
+};
+
             // 兼容字符串、数组、对象和 JSON 字符串形式的媒体字段
       const mediaFileId = value => {
         if (!value) return '';
