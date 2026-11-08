@@ -679,11 +679,28 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
         }
         return {data:{records}};
       }
-      const [industryResult,categoryResult,applicationResult,resourceResult,homeFunctionResult]=await Promise.all([
-        listAll(cloudApp.models.industries),listAll(cloudApp.models.application_categories),
-        listAll(cloudApp.models.applications),listAll(cloudApp.models.application_resources),
-        cloudApp.callFunction({name:'getHomeModules',data:{},parse:true}).catch(error=>({error}))
-      ]);
+      
+const [
+  industryResult,
+  categoryResult,
+  applicationResult,
+  resourceResult,
+  homeFunctionResult
+] = await Promise.all([
+  listAll(cloudApp.models.industries),
+  listAll(cloudApp.models.application_categories),
+  listAll(cloudApp.models.applications),
+  cloudApp.callFunction({
+    name: 'getApplicationResources',
+    data: {},
+    parse: true
+  }),
+  cloudApp.callFunction({
+    name: 'getHomeModules',
+    data: {},
+    parse: true
+  }).catch(error => ({ error }))
+]);
 
       if (industryResult.error) throw industryResult.error;
       if (categoryResult.error) throw categoryResult.error;
@@ -699,8 +716,21 @@ window.ITW_FRONTEND["app-preview"] = module.exports; }
       const applicationRecords =
         applicationResult.data?.records || [];
       
-      const resourceRecords =
-        resourceResult.data?.records || [];
+const resourcePayload =
+  cloudFunctionPayload(resourceResult);
+
+if (
+  resourcePayload.ok !== true ||
+  !Array.isArray(resourcePayload.resources)
+) {
+  throw new Error(
+    resourcePayload.message ||
+    'getApplicationResources 返回的数据格式不正确'
+  );
+}
+
+const resourceRecords = resourcePayload.resources;
+
 
       if (!homeFunctionResult.error) {
         const homePayload = cloudFunctionPayload(homeFunctionResult);
