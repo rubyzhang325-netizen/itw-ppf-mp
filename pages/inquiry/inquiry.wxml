@@ -31,7 +31,7 @@
     <label class="check-row"><checkbox value="marketing" color="#8A1538" checked="{{form.marketing}}" />我愿意接收产品和服务相关的信息</label>
     <label class="check-row"><checkbox value="agree" color="#8A1538" checked="{{form.agree}}" />我同意<text class="link" catchtap="showTerms">使用条例和隐私权声明</text></label>
   </checkbox-group>
-  <view class="btn-primary" bindtap="submit">提交</view>
+  <view class="btn-primary {{submitting ? 'disabled' : ''}}" bindtap="submit">{{submitting ? '提交中...' : '提交'}}</view>
 </view>
 </view>
 <lock-mask lock="{{lock}}" />

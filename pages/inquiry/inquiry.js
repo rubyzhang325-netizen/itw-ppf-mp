@@ -1,4 +1,5 @@
 const auth = require('../../utils/auth')
+const api = require('../../utils/api')
 const mock = require('../../utils/mock')
 const { MARKETS, pair } = require('../../utils/markets')
 const MARKET_FIELDS = [{key:'marketId',label:'选择市场',type:'market',required:true},{key:'segmentId',label:'选择细分市场',type:'segment',required:true}]
@@ -36,10 +37,15 @@ const TABS = [
   ] }
 ]
 
+function createRequestId() {
+  return `inquiry-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+}
+
 Page({
   data: {
     markets:MARKETS, segments:[], marketIndex:-1, segmentIndex:-1,
     tabs: TABS, tab: 0, fields: TABS[0].fields, form: {},
+    submitting: false,
     productNames: mock.PRODUCTS.map(p => p.brandName + ' ' + p.name),
     appNames: mock.APPS.map(a => mock.subOf(a.subId).name + ' · ' + a.name)
   },
@@ -75,8 +81,9 @@ Page({
   },
   showTerms() { wx.showModal({ title: '使用条例和隐私权声明', content: '正式条款由 ITW 提供。', showCancel: false }) },
 
-  submit() {
+  async submit() {
     if (!auth.can('registered')) return
+    if (this.data.submitting) return
     const f = this.data.form
     const market = pair(f.marketId,f.segmentId)
     if(!market) return wx.showToast({title:'请选择市场和细分市场',icon:'none'})
@@ -87,9 +94,50 @@ Page({
     if (!/^1\d{10}$/.test(f.phone)) return wx.showToast({ title: '手机号格式不正确', icon: 'none' })
     if (!/^\S+@\S+\.\S+$/.test(f.email)) return wx.showToast({title:'邮箱格式不正确',icon:'none'})
     if (!f.agree) return wx.showToast({ title: '请先同意使用条例和隐私权声明', icon: 'none' })
-    this.lastPayload = {...f,...market,type:TABS[this.data.tab].key,productId:(mock.PRODUCTS[f.product]||{}).id||'',applicationId:(mock.APPS[f.app]||{}).id||''}
-    // 正式版：写入 CloudBase 咨询记录并分派处理人（后台流程待开发）
-    wx.showModal({ title: '表单校验通过', content: '当前为前端演示，咨询尚未发送，也未通知销售。正式提交待后台接口接入。', showCancel: false })
+    const basePayload = {
+      type: TABS[this.data.tab].key,
+      marketId: market.marketId,
+      segmentId: market.segmentId,
+      name: f.name || '',
+      phone: f.phone || '',
+      company: f.company || '',
+      email: f.email || '',
+      region: Array.isArray(f.region) ? f.region : [],
+      address: f.address || '',
+      purpose: f.purpose || '',
+      scene: f.scene || '',
+      question: f.question || '',
+      productId: (mock.PRODUCTS[f.product] || {}).id || '',
+      applicationId: (mock.APPS[f.app] || {}).id || '',
+      agree: f.agree === true,
+      marketing: f.marketing === true
+    }
+    const signature = JSON.stringify(basePayload)
+    if (signature !== this.lastPayloadSignature) {
+      this.lastPayloadSignature = signature
+      this.submitRequestId = createRequestId()
+    }
+    const payload = { requestId: this.submitRequestId, ...basePayload }
+    this.lastPayload = payload
+    this.setData({ submitting: true })
+    try {
+      const result = await api.submitInquiry(payload)
+      wx.showModal({
+        title: result.duplicate ? '请勿重复提交' : '提交成功',
+        content: result.duplicate
+          ? '该咨询已提交，请勿重复操作。'
+          : '您的咨询已提交，ITW工作人员将按照后台流程跟进。',
+        showCancel: false
+      })
+    } catch (error) {
+      wx.showModal({
+        title: '提交失败',
+        content: error && error.message ? error.message : '提交失败，请稍后重试',
+        showCancel: false
+      })
+    } finally {
+      this.setData({ submitting: false })
+    }
   }
 })
 

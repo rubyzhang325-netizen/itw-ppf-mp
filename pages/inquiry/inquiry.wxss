@@ -4,3 +4,4 @@
 .tab.on::after { content: ''; position: absolute; left: 30%; right: 30%; bottom: 8rpx; height: 6rpx; border-radius: 6rpx; background: #8A1538; }
 .region { display: flex; }
 .r-cell { flex: 1; font-size: 28rpx; }
+.btn-primary.disabled { opacity: .55; }
