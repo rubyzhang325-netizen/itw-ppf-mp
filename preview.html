@@ -691,24 +691,12 @@ const [
   listAll(cloudApp.models.application_categories),
   listAll(cloudApp.models.applications),
   
-cloudApp.callFunction({
-  name: 'getApplicationResources',
-  data: {},
-  parse: true
-}).catch(error => {
-  console.error(
-    'CloudBase application resources request failed:',
-    error
-  );
-  return { error };
-}),
-
-  cloudApp.callFunction({
-    name: 'getHomeModules',
-    data: {},
-    parse: true
-  }).catch(error => ({ error }))
+const [industryResult,categoryResult,applicationResult,resourceResult,homeFunctionResult]=await Promise.all([
+  listAll(cloudApp.models.industries),listAll(cloudApp.models.application_categories),
+  listAll(cloudApp.models.applications),listAll(cloudApp.models.application_resources),
+  cloudApp.callFunction({name:'getHomeModules',data:{},parse:true}).catch(error=>({error}))
 ]);
+
 
       if (industryResult.error) throw industryResult.error;
       if (categoryResult.error) throw categoryResult.error;
@@ -724,36 +712,9 @@ cloudApp.callFunction({
       const applicationRecords =
         applicationResult.data?.records || [];
       
+const resourceRecords =
+  resourceResult.data?.records || [];
 
-let resourceRecords = [];
-
-if (resourceResult.error) {
-  console.error(
-    '四个资源模型同步失败，但应用目录继续同步：',
-    resourceResult.error
-  );
-} else {
-  const resourcePayload =
-    cloudFunctionPayload(resourceResult);
-
-  if (
-    resourcePayload.ok === true &&
-    Array.isArray(resourcePayload.resources)
-  ) {
-    resourceRecords = resourcePayload.resources;
-
-    console.log(
-      '四个应用资源模型同步成功：',
-      resourceRecords.length,
-      resourcePayload.counts || {}
-    );
-  } else {
-    console.error(
-      '四个资源模型返回格式异常：',
-      resourcePayload
-    );
-  }
-}
 
       if (!homeFunctionResult.error) {
         const homePayload = cloudFunctionPayload(homeFunctionResult);
