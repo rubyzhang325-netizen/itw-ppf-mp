@@ -1,5 +1,7 @@
-// 本地前端配置。修改后需重新构建/发布；后台配置接口留待后续接入。
-// 正式版这些数据存在 CloudBase，由运营在后台用预制控件新增、排序、隐藏、设置跳转和权限。
+const api = require('./api')
+
+// 本地配置作为云函数读取失败时的安全兜底。
+// 首页模块的名称、排序、显示状态、样式和跳转由 CloudBase 后台管理。
 // access：public 所有人 / registered 已注册 / certified 认证会员和员工
 const ARTICLE_URL = 'https://mp.weixin.qq.com/'
 
@@ -75,9 +77,65 @@ const PAGES = {
   }
 }
 
-module.exports = { HOME, PAGES, LINKS, ABOUT }
+let remoteHomeModules = null
 
+function number(value, fallback) {
+  const result = Number(value)
+  return Number.isFinite(result) ? result : fallback
+}
+
+function localModule(key) {
+  return HOME.modules.find(item => item.key === key)
+}
+
+// 前端访问权限仍由代码固定控制，不开放给后台运营修改。
+function normalizeRemoteModule(item, index) {
+  const local = localModule(item.key) || {}
+
+  return Object.assign({}, local, item, {
+    access: local.access || 'registered',
+    visible: item.visible !== false,
+    sort: number(item.sort, index),
+    link: Object.assign({}, local.link || {}, item.link || {})
+  })
+}
 
 // 可在每个模块中设置 sort、background（颜色/渐变）、backgroundImage（图片地址）。
-function homeModules() { return HOME.modules.map((m,i)=>({...m,sort:m.sort == null ? i : Number(m.sort)})).filter(m=>m.visible!==false).sort((a,b)=>a.sort-b.sort) }
-module.exports.homeModules = homeModules
+function homeModules() {
+  const source = remoteHomeModules || HOME.modules
+
+  return source
+    .map((item, index) => Object.assign({}, item, {
+      sort: number(item.sort, index)
+    }))
+    .filter(item => item.visible !== false)
+    .sort((a, b) => a.sort - b.sort)
+}
+
+async function loadHomeModules() {
+  const result = await api.getHomeModules()
+  const records = Array.isArray(result.modules) ? result.modules : []
+
+  if (!records.length) {
+    throw new Error('后台没有可用的首页模块')
+  }
+
+  remoteHomeModules = records
+    .filter(item => item && item.key && item.name)
+    .map(normalizeRemoteModule)
+
+  if (!remoteHomeModules.length) {
+    throw new Error('后台首页模块数据格式无效')
+  }
+
+  return homeModules()
+}
+
+module.exports = {
+  HOME,
+  PAGES,
+  LINKS,
+  ABOUT,
+  homeModules,
+  loadHomeModules
+}
